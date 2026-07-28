@@ -8,10 +8,17 @@ you left it on, and the setting is invisible once it is set. Awake makes it one
 click or one word, and puts a mug in the menu bar so you can always see the
 answer.
 
+Run `awake` with no arguments and it tells you where things stand:
+
 ```
-awake on      # do not sleep, even with the lid closed
-awake off     # back to normal
-awake         # report the current setting
+  Awake  keep this Mac from sleeping
+
+  Status   OFF this Mac sleeps normally
+
+  awake on       disable sleep, even with the lid closed
+  awake off      restore normal sleep
+  awake status   print just the status line
+  awake help     show this
 ```
 
 The menu bar shows an outline mug when sleep is normal and a filled mug while
@@ -39,34 +46,61 @@ sudo make uninstall
 
 ## How it works
 
-Three executables and a small shared library:
+**One executable, three modes.** The menu bar app, the `awake` command and the
+privileged daemon are the same binary invoked differently:
 
-| Component | Runs as | Job |
+| Invocation | Runs as | Mode |
 | --- | --- | --- |
-| `Awake` | you | Menu bar item, and one-time helper installation |
-| `awake` | you | CLI front end |
-| `awake-helper` | root | The only thing that calls `pmset` |
-| `AwakeCore` | — | Shared channels, paths and state reading |
+| `Awake.app` (or `--menubar`) | you | Menu bar item |
+| `awake …` | you | Command line |
+| `--helper` | root | The only thing that calls `pmset` |
+| `--install-daemon` | root | One-shot helper registration |
 
-Nothing but the helper is privileged. The app and the CLI ask for a change by
+With no arguments it picks by context: a terminal gets the status overview, a
+Finder launch gets the menu bar app.
+
+Nothing is copied at install time. The LaunchDaemon runs the app's own binary in
+place, and `/usr/local/bin/awake` is a symlink to it, so there is exactly one
+executable on disk and no way for two copies to drift apart.
+
+Nothing but the helper is privileged. The app and the CLI *ask* for a change by
 posting a [`notify(3)`](https://developer.apple.com/documentation/darwin/notify_post)
-event; the helper performs it and posts back that the state moved.
+event; the helper performs it.
+
+### Staying in sync
+
+The helper is the single writer of the current state, and it publishes into
+notify's own 64-bit state slot on `com.awake.changed`. Two rules make everything
+agree:
+
+- **It waits before publishing.** `pmset -g` can still report the old value for
+  a moment after a write. Announcing as soon as `pmset` returns is what made the
+  menu bar trail the CLI: observers woke, sampled a setting mid-flight, and
+  showed a stale answer. The helper confirms the change is observable first.
+- **Nobody else re-reads.** Observers take the published value rather than
+  running their own `pmset`, so there is one answer, not three that can race.
+
+Changes made by something *other* than Awake -- a direct `sudo pmset` call --
+are caught by a 60 second drift check in the helper, which republishes and
+announces if reality has moved. That is the only path with a delay, and it is
+the only path where Awake is not the one making the change.
 
 ### Why the password is asked once
 
-The helper is a LaunchDaemon. `sudo make install` puts it in place while it
-already has root, so a source install never prompts separately, and the daemon
-survives reboots. A prebuilt `Awake.app` dragged into `/Applications` instead
-asks for authorization the first time it launches, installs the same daemon, and
-never asks again.
+The helper is a LaunchDaemon. `sudo make install` registers it while it already
+has root, so a source install never prompts separately, and the daemon survives
+reboots. A prebuilt `Awake.app` dragged into `/Applications` instead asks for
+authorization the first time it launches, registers the same daemon, and never
+asks again.
 
 ### Cost
 
 Idle, Awake costs nothing: every component is blocked waiting for an event.
-Toggles are pushed, not polled. The menu bar keeps one backstop timer at 60
-seconds with 15 seconds of tolerance, to catch changes made by something other
-than Awake and to let the OS coalesce that wakeup with others. Each check is a
-single `pmset -g`, roughly 0.3 ms of CPU.
+Toggles are pushed, not polled, and reading the published state is a memory
+lookup rather than a process spawn. The two `pmset` calls that remain are the
+helper's drift check and the menu bar's backstop, both on 60 second timers with
+15 seconds of tolerance so the OS can coalesce those wakeups with others. Each
+costs roughly 0.3 ms of CPU.
 
 ### Security
 
@@ -83,10 +117,14 @@ either.
 ## Development
 
 ```sh
-swift build              # all four executables
+swift build              # the executable
 make bundle              # assemble build/Awake.app without installing
 make clean
 ```
+
+`make install` compiles as the invoking user and only the installation itself
+runs as root, so `sudo make install` does not leave root-owned artifacts in
+`.build/`.
 
 The app icon is generated, not committed: `Tools/MakeIcon` renders it from the
 same `mug.fill` symbol the menu bar uses, so the two cannot drift apart.
@@ -97,18 +135,17 @@ that opens without a Gatekeeper warning needs a Developer ID signature.
 ### Layout
 
 ```
-Sources/AwakeCore     shared channels, paths, state reading
-Sources/AwakeApp      menu bar app and helper installer
-Sources/AwakeCLI      the awake command
-Sources/AwakeHelper   privileged daemon
-Tools/MakeIcon        icon generator (build time only)
-Resources             Info.plist, LaunchAgent plist
+Sources/Awake/
+  main.swift                  mode dispatch
+  Channel.swift               notify channels and token wrapper
+  SleepState.swift            published state and the pmset read
+  CommandLineInterface.swift  the awake command
+  MenuBarController.swift     menu bar item
+  Helper.swift                privileged daemon
+  HelperInstaller.swift       one-time registration
+Tools/MakeIcon                icon generator (build time only)
+Resources                     Info.plist, LaunchAgent plist
 ```
-
-Target names avoid case-only differences on purpose. macOS filesystems are
-case-insensitive by default, so `Awake` and `awake` cannot coexist in one
-directory -- which is also why the CLI ships in `Contents/Helpers` rather than
-beside the app binary in `Contents/MacOS`.
 
 ## License
 
