@@ -11,6 +11,24 @@ SWIFT_BUILD  := .build/release
 BUNDLE       := build/Awake.app
 CONTENTS     := $(BUNDLE)/Contents
 
+# Ad-hoc by default, which is all Awake needs to run. The cost is cosmetic:
+# Login Items & Extensions lists the agent and the daemon as two anonymous
+# rows reading "Item from unidentified developer", with no icon.
+#
+# That is AssociatedBundleIdentifiers -- the key in both launchd plists meant
+# to fold the two jobs into a single "Awake" row -- being ignored, because
+# macOS honours it only when the program carries a Team ID, and an ad-hoc
+# signature has none. Signing with any real certificate supplies one; take the
+# name from `security find-identity -v -p codesigning` and pass it verbatim:
+#
+#   sudo make install CODESIGN_ID="Apple Development: you@example.com (XXXXXXXXXX)"
+#
+# A free Apple ID is enough -- Xcode's Settings > Accounts > Manage
+# Certificates issues an "Apple Development" certificate under a personal
+# team, which has a Team ID like any other. A Developer ID is only needed to
+# hand the built app to someone else.
+CODESIGN_ID  ?= -
+
 APP_DEST     := /Applications/Awake.app
 CLI_DEST     := /usr/local/bin/awake
 AGENT_PLIST  := /Library/LaunchAgents/com.awake.app.plist
@@ -46,9 +64,10 @@ bundle: build Resources/Awake.icns
 	cp $(SWIFT_BUILD)/Awake  $(CONTENTS)/MacOS/Awake
 	cp Resources/Info.plist  $(CONTENTS)/Info.plist
 	cp Resources/Awake.icns  $(CONTENTS)/Resources/Awake.icns
-	@# Ad-hoc signature: enough for local use. Replace with a Developer ID to
-	@# distribute a build others can open without Gatekeeper complaining.
-	codesign --force --sign - $(BUNDLE)
+	@# Ad-hoc signature unless CODESIGN_ID says otherwise -- see the note at
+	@# the top of this file. Quoted: an identity name carries spaces and
+	@# parentheses.
+	codesign --force --sign "$(CODESIGN_ID)" $(BUNDLE)
 	@echo "built $(BUNDLE)"
 
 check-root:
@@ -60,11 +79,15 @@ check-root:
 # Building under sudo would leave root-owned artifacts in .build/ that the
 # next ordinary `swift build` cannot overwrite, so drop back to the invoking
 # user for the compile and keep only the installation privileged.
+#
+# CODESIGN_ID is repeated explicitly because sudo clears the environment, and
+# with it the MAKEFLAGS that would otherwise carry a command-line override
+# into the sub-make -- which would silently sign ad-hoc despite the argument.
 build-as-user:
 	@if [ -n "$$SUDO_USER" ]; then \
-		sudo -u "$$SUDO_USER" $(MAKE) bundle; \
+		sudo -u "$$SUDO_USER" $(MAKE) bundle CODESIGN_ID="$(CODESIGN_ID)"; \
 	else \
-		$(MAKE) bundle; \
+		$(MAKE) bundle CODESIGN_ID="$(CODESIGN_ID)"; \
 	fi
 
 # Heals a tree left by an earlier version of this Makefile, which compiled

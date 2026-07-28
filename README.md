@@ -44,6 +44,36 @@ To remove everything, including the helper, and restore normal sleep:
 sudo make uninstall
 ```
 
+### Signing
+
+The default build is signed ad-hoc, which runs fine but looks untidy: System
+Settings > General > Login Items & Extensions lists Awake's two launchd jobs as
+separate rows reading *Item from unidentified developer*, with no icon.
+
+Both plists already carry `AssociatedBundleIdentifiers`, the key that folds
+them into one "Awake" row, but macOS honours it only when the signed program
+has a Team ID -- and an ad-hoc signature has none. Any real certificate
+supplies one, including the free kind: in Xcode, **Settings > Accounts**, add
+your Apple ID, then **Manage Certificates > + > Apple Development**. A paid
+Developer ID is only needed to give the built app to someone else.
+
+Then pass the identity, exactly as `security find-identity -v -p codesigning`
+prints it:
+
+```sh
+sudo make install CODESIGN_ID="Apple Development: you@example.com (XXXXXXXXXX)"
+```
+
+Login Items then shows a single "Awake" entry with the app icon and two items,
+one of them system-wide -- that one is the daemon.
+
+If `find-identity` reports the certificate but not as a *valid* identity
+(`CSSMERR_TP_NOT_TRUSTED`), the chain cannot be built: macOS ships an
+intermediate that expired in February 2023, and current certificates are issued
+by the G3 one. Install it from
+[Apple's certificate authority page](https://www.apple.com/certificateauthority/)
+(`AppleWWDRCAG3.cer`) and check again.
+
 ## How it works
 
 **One executable, three modes.** The menu bar app, the `awake` command and the
