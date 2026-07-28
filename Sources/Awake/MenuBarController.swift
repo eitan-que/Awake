@@ -1,6 +1,4 @@
-import AwakeCore
 import Cocoa
-import notify
 
 /// The menu bar item: a mug that fills in while sleep is disabled.
 ///
@@ -9,17 +7,18 @@ import notify
 /// the Mac is being held awake.
 final class MenuBarController: NSObject, NSApplicationDelegate {
 
-    /// Catches changes made outside Awake, such as a direct pmset call. Wide
-    /// tolerance lets the OS coalesce this wakeup with others instead of
-    /// waking the CPU on its own schedule.
+    /// Only catches changes made by something other than Awake. Everything
+    /// Awake does arrives as an event, so this can be slow and wide: the
+    /// tolerance lets the OS coalesce the wakeup with others instead of waking
+    /// the CPU on its own schedule.
     private static let backstopInterval: TimeInterval = 60
     private static let backstopTolerance: TimeInterval = 15
-    private static let invalidToken: Int32 = -1
 
     private var statusItem: NSStatusItem!
     private var toggleItem: NSMenuItem!
     private var backstop: Timer?
-    private var changedToken = MenuBarController.invalidToken
+    private var reader: NotifyToken?
+    private var watcher: NotifyToken?
     private var isDisabled = false
 
     private let work = DispatchQueue(label: "com.awake.app.work", qos: .utility)
@@ -31,64 +30,39 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
         statusItem.menu = buildMenu()
         statusItem.button?.imagePosition = .imageOnly
 
-        // The helper announces every change, so the normal path is a push, not
-        // a poll.
-        notify_register_dispatch(Channel.changed, &changedToken, DispatchQueue.main) { [weak self] _ in
-            self?.refresh()
+        // Separate tokens: one to read the published state, one to be woken.
+        reader = NotifyToken(checking: Channel.changed)
+        watcher = NotifyToken(watching: Channel.changed, on: .main) { [weak self] in
+            self?.adoptPublishedState()
         }
 
         let timer = Timer(timeInterval: Self.backstopInterval, repeats: true) { [weak self] _ in
-            self?.refresh()
+            self?.resyncFromPmset()
         }
         timer.tolerance = Self.backstopTolerance
         RunLoop.main.add(timer, forMode: .common)
         backstop = timer
 
-        render(disabled: SleepState.isDisabled())
+        render(disabled: SleepState.current(via: reader))
         ensureHelper()
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        if changedToken != Self.invalidToken {
-            notify_cancel(changedToken)
-        }
-    }
-
-    // MARK: - Helper
-
-    private func ensureHelper() {
-        guard !Paths.helperIsInstalled else { return }
-        work.async { [weak self] in
-            let installed = HelperInstaller.requestInstall()
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if installed {
-                    self.refresh()
-                } else {
-                    self.reportMissingHelper()
-                }
-            }
-        }
-    }
-
-    private func reportMissingHelper() {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Awake could not install its helper"
-        alert.informativeText = """
-            Awake can still show whether sleep is disabled, but it cannot change \
-            it. Quit and reopen Awake to try again.
-            """
-        alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
     }
 
     // MARK: - State
 
-    private func refresh() {
+    /// The fast path. The helper publishes only values it has confirmed, so
+    /// this needs no pmset call and cannot render a half-applied change --
+    /// which is what used to make the menu bar trail the CLI.
+    private func adoptPublishedState() {
+        guard let reader, let disabled = SleepState.published(via: reader) else {
+            resyncFromPmset()
+            return
+        }
+        render(disabled: disabled)
+    }
+
+    private func resyncFromPmset() {
         work.async { [weak self] in
-            let disabled = SleepState.isDisabled()
+            let disabled = SleepState.fromPmset()
             DispatchQueue.main.async { self?.render(disabled: disabled) }
         }
     }
@@ -107,6 +81,36 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
             : "Awake is off. This Mac sleeps normally."
 
         toggleItem.title = disabled ? "Turn Awake Off" : "Turn Awake On"
+    }
+
+    // MARK: - Helper
+
+    private func ensureHelper() {
+        guard !Paths.helperIsInstalled else { return }
+        work.async { [weak self] in
+            let installed = HelperInstaller.requestInstall()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if installed {
+                    self.adoptPublishedState()
+                } else {
+                    self.reportMissingHelper()
+                }
+            }
+        }
+    }
+
+    private func reportMissingHelper() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Awake could not install its helper"
+        alert.informativeText = """
+            Awake can still show whether sleep is disabled, but it cannot change \
+            it. Quit and reopen Awake to try again.
+            """
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     // MARK: - Menu

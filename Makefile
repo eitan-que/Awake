@@ -13,8 +13,10 @@ CONTENTS     := $(BUNDLE)/Contents
 
 APP_DEST     := /Applications/Awake.app
 CLI_DEST     := /usr/local/bin/awake
-HELPER_BIN   := /usr/local/libexec/awake-helper
 AGENT_PLIST  := /Library/LaunchAgents/com.awake.app.plist
+
+# Separate helper binary from before the executables were merged into one.
+LEGACY_HELPER := /usr/local/libexec/awake-helper
 DAEMON_PLIST := /Library/LaunchDaemons/com.awake.helper.plist
 AGENT_LABEL  := com.awake.app
 DAEMON_LABEL := com.awake.helper
@@ -40,15 +42,13 @@ Resources/Awake.icns: build Tools/MakeIcon/main.swift
 
 bundle: build Resources/Awake.icns
 	@rm -rf $(BUNDLE)
-	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Helpers $(CONTENTS)/Resources
-	cp $(SWIFT_BUILD)/AwakeApp    $(CONTENTS)/MacOS/Awake
-	cp $(SWIFT_BUILD)/AwakeCLI    $(CONTENTS)/Helpers/awake
-	cp $(SWIFT_BUILD)/AwakeHelper $(CONTENTS)/Helpers/awake-helper
-	cp Resources/Info.plist       $(CONTENTS)/Info.plist
-	cp Resources/Awake.icns       $(CONTENTS)/Resources/Awake.icns
+	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
+	cp $(SWIFT_BUILD)/Awake  $(CONTENTS)/MacOS/Awake
+	cp Resources/Info.plist  $(CONTENTS)/Info.plist
+	cp Resources/Awake.icns  $(CONTENTS)/Resources/Awake.icns
 	@# Ad-hoc signature: enough for local use. Replace with a Developer ID to
 	@# distribute a build others can open without Gatekeeper complaining.
-	codesign --force --deep --sign - $(BUNDLE)
+	codesign --force --sign - $(BUNDLE)
 	@echo "built $(BUNDLE)"
 
 check-root:
@@ -57,7 +57,27 @@ check-root:
 		exit 1; \
 	fi
 
-install: bundle check-root
+# Building under sudo would leave root-owned artifacts in .build/ that the
+# next ordinary `swift build` cannot overwrite, so drop back to the invoking
+# user for the compile and keep only the installation privileged.
+build-as-user:
+	@if [ -n "$$SUDO_USER" ]; then \
+		sudo -u "$$SUDO_USER" $(MAKE) bundle; \
+	else \
+		$(MAKE) bundle; \
+	fi
+
+# Heals a tree left by an earlier version of this Makefile, which compiled
+# under sudo. Runs while still root, because that is the only way to remove
+# what root created.
+clean-stale: check-root
+	@if [ -n "$$SUDO_USER" ]; then \
+		find build .build -user root -print -quit 2>/dev/null | grep -q . \
+			&& echo "removing root-owned build artifacts" \
+			&& rm -rf build .build || true; \
+	fi
+
+install: check-root clean-stale build-as-user
 	@# Stop whatever is already running before replacing it on disk.
 	-@launchctl bootout gui/$(REAL_UID)/$(AGENT_LABEL) 2>/dev/null || true
 	-@launchctl bootout system/$(DAEMON_LABEL) 2>/dev/null || true
@@ -66,8 +86,9 @@ install: bundle check-root
 	cp -R $(BUNDLE) $(APP_DEST)
 	chown -R root:wheel $(APP_DEST)
 
+	@# The CLI is the same binary; nothing is copied.
 	install -d /usr/local/bin
-	ln -sf $(APP_DEST)/Contents/Helpers/awake $(CLI_DEST)
+	ln -sf $(APP_DEST)/Contents/MacOS/Awake $(CLI_DEST)
 
 	@# Already root here, so the helper goes in without a password prompt and
 	@# the app never has to ask on first launch.
@@ -82,7 +103,9 @@ install: bundle check-root
 uninstall: check-root
 	-@launchctl bootout gui/$(REAL_UID)/$(AGENT_LABEL) 2>/dev/null || true
 	-@launchctl bootout system/$(DAEMON_LABEL) 2>/dev/null || true
-	rm -f $(AGENT_PLIST) $(DAEMON_PLIST) $(HELPER_BIN) $(CLI_DEST)
+	rm -f $(AGENT_PLIST) $(DAEMON_PLIST) $(CLI_DEST)
+	@# Left behind by installations from before the binaries were merged.
+	rm -f $(LEGACY_HELPER)
 	rm -rf $(APP_DEST)
 	@# Never leave a machine that cannot sleep behind.
 	pmset -a disablesleep 0
