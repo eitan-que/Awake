@@ -11,7 +11,8 @@ import Foundation
 enum Paths {
     static let appBundle = "/Applications/Awake.app"
     static let executable = "\(appBundle)/Contents/MacOS/Awake"
-    static let cli = "/usr/local/bin/awake"
+    static let cliDirectory = "/usr/local/bin"
+    static let cli = "\(cliDirectory)/awake"
 
     static let daemonPlist = "/Library/LaunchDaemons/com.awake.helper.plist"
     static let daemonLabel = "com.awake.helper"
@@ -19,7 +20,20 @@ enum Paths {
     static let agentPlist = "/Library/LaunchAgents/com.awake.app.plist"
     static let agentLabel = "com.awake.app"
 
+    /// Whether the one privileged piece is in place. The CLI reports on this
+    /// alone, because it is all `awake on` needs.
     static var helperIsInstalled: Bool {
         FileManager.default.fileExists(atPath: daemonPlist)
+    }
+
+    /// Everything `--install-daemon` puts in place. Deliberately stricter than
+    /// `helperIsInstalled`: a version installed from the disk image before the
+    /// command and the login agent were part of that step reads as incomplete,
+    /// so opening the app once finishes the job.
+    static var isFullyInstalled: Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: daemonPlist)
+            && fm.fileExists(atPath: agentPlist)
+            && fm.fileExists(atPath: cli)
     }
 }

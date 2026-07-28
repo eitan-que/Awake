@@ -44,7 +44,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
         backstop = timer
 
         render(disabled: SleepState.current(via: reader))
-        ensureHelper()
+        ensureInstalled()
     }
 
     // MARK: - State
@@ -83,10 +83,26 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
         toggleItem.title = disabled ? "Turn Awake Off" : "Turn Awake On"
     }
 
-    // MARK: - Helper
+    // MARK: - Installation
 
-    private func ensureHelper() {
-        guard !Paths.helperIsInstalled else { return }
+    private func ensureInstalled() {
+        guard !Paths.isFullyInstalled else { return }
+
+        // The launchd jobs and the `awake` symlink all name
+        // /Applications/Awake.app, so installing from anywhere else -- most
+        // often straight out of the mounted disk image -- would register a
+        // helper against a bundle that is about to go away.
+        guard (Bundle.main.bundlePath as NSString).standardizingPath == Paths.appBundle else {
+            report(title: "Move Awake to Applications",
+                   detail: """
+                       Awake installs a background helper that refers to it at \
+                       /Applications/Awake.app, so it has to live there before \
+                       it can turn sleep off. Drag Awake to Applications and \
+                       open it again.
+                       """)
+            return
+        }
+
         work.async { [weak self] in
             let installed = HelperInstaller.requestInstall()
             DispatchQueue.main.async {
@@ -94,20 +110,22 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
                 if installed {
                     self.adoptPublishedState()
                 } else {
-                    self.reportMissingHelper()
+                    self.report(title: "Awake could not finish installing",
+                                detail: """
+                                    Awake can still show whether sleep is \
+                                    disabled, but it cannot change it. Quit and \
+                                    reopen Awake to try again.
+                                    """)
                 }
             }
         }
     }
 
-    private func reportMissingHelper() {
+    private func report(title: String, detail: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Awake could not install its helper"
-        alert.informativeText = """
-            Awake can still show whether sleep is disabled, but it cannot change \
-            it. Quit and reopen Awake to try again.
-            """
+        alert.messageText = title
+        alert.informativeText = detail
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()

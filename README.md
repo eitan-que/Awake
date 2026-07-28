@@ -26,8 +26,8 @@ the Mac is being held awake.
 
 ## Install
 
-Requires macOS 13 or newer. Building from source is the recommended route and
-the only one that installs everything.
+Requires macOS 13 or newer. Either route installs the same thing; the disk
+image needs no toolchain, building from source needs no trip through Gatekeeper.
 
 ### From source
 
@@ -52,18 +52,14 @@ sudo make uninstall
 ### From the disk image
 
 [Releases](https://github.com/eitan-que/Awake/releases) carries a `.dmg`
-holding the app on its own. Open it, drag Awake to Applications, and launch it;
-it asks for your password once to register the privileged helper.
+holding the app on its own. Open it, drag Awake to Applications, and launch it
+from there; it asks for your password once and installs the same things
+`sudo make install` does -- the helper, the `awake` command and the login agent.
 
-Two caveats, because the disk image ships only the app bundle:
-
-- **The `awake` command is not installed.** The binary is inside the bundle, so
-  `/Applications/Awake.app/Contents/MacOS/Awake status` works, or symlink it
-  yourself: `sudo ln -sf /Applications/Awake.app/Contents/MacOS/Awake /usr/local/bin/awake`
-- **The menu bar app does not start at login.** Launch it from Applications, or
-  add it under System Settings > General > Login Items.
-
-`sudo make install` does both of those for you.
+It has to be dragged out first. Everything Awake installs names
+`/Applications/Awake.app`, so opening it from inside the disk image would point
+a root daemon at a bundle about to be unmounted; the app says so and stops
+rather than doing it.
 
 The build is signed ad-hoc rather than with a Developer ID, so macOS will refuse
 to open it on the first try. To let it through, open **System Settings > Privacy

@@ -129,16 +129,12 @@ install: check-root clean-stale build-as-user
 	cp -R $(BUNDLE) $(APP_DEST)
 	chown -R root:wheel $(APP_DEST)
 
-	@# The CLI is the same binary; nothing is copied.
-	install -d /usr/local/bin
-	ln -sf $(APP_DEST)/Contents/MacOS/Awake $(CLI_DEST)
-
-	@# Already root here, so the helper goes in without a password prompt and
-	@# the app never has to ask on first launch.
+	@# Everything outside the bundle -- both launchd jobs and the `awake`
+	@# symlink -- is the app's own --install-daemon step, which is also what
+	@# runs when someone installs from the disk image instead. Already root
+	@# here, so it goes in without a password prompt. SUDO_UID tells it which
+	@# GUI session to start the menu bar agent in.
 	$(APP_DEST)/Contents/MacOS/Awake --install-daemon
-
-	install -o root -g wheel -m 0644 Resources/com.awake.app.plist $(AGENT_PLIST)
-	launchctl bootstrap gui/$(REAL_UID) $(AGENT_PLIST)
 
 	@echo
 	@echo "Awake installed. The mug is in your menu bar; try: awake on"
