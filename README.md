@@ -26,7 +26,12 @@ the Mac is being held awake.
 
 ## Install
 
-Requires macOS 13 or newer and the Xcode command line tools.
+Requires macOS 13 or newer. Building from source is the recommended route and
+the only one that installs everything.
+
+### From source
+
+Needs the Xcode command line tools.
 
 ```sh
 git clone https://github.com/eitan-que/Awake.git
@@ -43,6 +48,28 @@ To remove everything, including the helper, and restore normal sleep:
 ```sh
 sudo make uninstall
 ```
+
+### From the disk image
+
+[Releases](https://github.com/eitan-que/Awake/releases) carries a `.dmg`
+holding the app on its own. Open it, drag Awake to Applications, and launch it;
+it asks for your password once to register the privileged helper.
+
+Two caveats, because the disk image ships only the app bundle:
+
+- **The `awake` command is not installed.** The binary is inside the bundle, so
+  `/Applications/Awake.app/Contents/MacOS/Awake status` works, or symlink it
+  yourself: `sudo ln -sf /Applications/Awake.app/Contents/MacOS/Awake /usr/local/bin/awake`
+- **The menu bar app does not start at login.** Launch it from Applications, or
+  add it under System Settings > General > Login Items.
+
+`sudo make install` does both of those for you.
+
+The build is signed ad-hoc rather than with a Developer ID, so macOS will refuse
+to open it on the first try. To let it through, open **System Settings > Privacy
+& Security**, scroll to the message naming Awake, click **Open Anyway**, and
+confirm with your admin password. Since macOS 15 this is the only way in --
+Control-clicking the app no longer skips the check.
 
 ### Signing
 

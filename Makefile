@@ -3,6 +3,7 @@
 #   make            build the app bundle into build/
 #   sudo make install    install system-wide
 #   sudo make uninstall  remove every installed file
+#   make dmg             package build/Awake.app into dist/ for a release
 #
 # Installation is system-wide because the privileged helper is a LaunchDaemon,
 # which has to live under /Library either way.
@@ -10,6 +11,12 @@
 SWIFT_BUILD  := .build/release
 BUNDLE       := build/Awake.app
 CONTENTS     := $(BUNDLE)/Contents
+
+# Info.plist is the single source of truth, so a release cannot be named a
+# version the app does not report.
+VERSION      := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+DIST         := dist
+DMG          := $(DIST)/Awake-$(VERSION).dmg
 
 # Ad-hoc by default, which is all Awake needs to run. The cost is cosmetic:
 # Login Items & Extensions lists the agent and the daemon as two anonymous
@@ -43,7 +50,7 @@ DAEMON_LABEL := com.awake.helper
 # real user's session instead.
 REAL_UID := $(shell if [ -n "$$SUDO_UID" ]; then echo $$SUDO_UID; else id -u; fi)
 
-.PHONY: all build bundle install uninstall clean check-root
+.PHONY: all build bundle dmg install uninstall clean check-root
 
 all: bundle
 
@@ -69,6 +76,19 @@ bundle: build Resources/Awake.icns
 	@# parentheses.
 	codesign --force --sign "$(CODESIGN_ID)" $(BUNDLE)
 	@echo "built $(BUNDLE)"
+
+# A release asset. The Applications symlink is the usual drag-here target; the
+# daemon cannot be installed from inside the disk image, so the app asks for a
+# password on first launch from /Applications instead.
+dmg: bundle
+	@rm -rf $(DIST)/stage $(DMG)
+	@mkdir -p $(DIST)/stage
+	cp -R $(BUNDLE) $(DIST)/stage/
+	ln -s /Applications $(DIST)/stage/Applications
+	hdiutil create -volname "Awake $(VERSION)" -srcfolder $(DIST)/stage \
+		-ov -quiet -format UDZO $(DMG)
+	@rm -rf $(DIST)/stage
+	@echo "built $(DMG)"
 
 check-root:
 	@if [ "$$(id -u)" != "0" ]; then \
@@ -136,4 +156,4 @@ uninstall: check-root
 
 clean:
 	swift package clean
-	rm -rf build Resources/Awake.icns
+	rm -rf build $(DIST) Resources/Awake.icns
