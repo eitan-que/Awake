@@ -77,6 +77,10 @@ enum HelperInstaller {
         \t\t<string>\(Paths.executable)</string>
         \t\t<string>--helper</string>
         \t</array>
+        \t<key>AssociatedBundleIdentifiers</key>
+        \t<array>
+        \t\t<string>com.awake.app</string>
+        \t</array>
         \t<key>RunAtLoad</key>
         \t<true/>
         \t<key>KeepAlive</key>
