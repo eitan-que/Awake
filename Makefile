@@ -17,6 +17,11 @@ CONTENTS     := $(BUNDLE)/Contents
 VERSION      := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
 DIST         := dist
 DMG          := $(DIST)/Awake-$(VERSION).dmg
+DMG_VOLUME   := Awake
+DMG_STAGE    := $(DIST)/stage
+DMG_RW       := $(DIST)/rw.dmg
+DMG_MOUNT    := /Volumes/$(DMG_VOLUME)
+DMG_BACKDROP := build/dmg-background.tiff
 
 # Ad-hoc by default, which is all Awake needs to run. The cost is cosmetic:
 # Login Items & Extensions lists the agent and the daemon as two anonymous
@@ -77,17 +82,47 @@ bundle: build Resources/Awake.icns
 	codesign --force --sign "$(CODESIGN_ID)" $(BUNDLE)
 	@echo "built $(BUNDLE)"
 
-# A release asset. The Applications symlink is the usual drag-here target; the
+# Generated like the app icon is, and for the same reason: the arrow has to be
+# drawn between the two icon positions the AppleScript sets, so one set of
+# numbers decides both.
+#
+# The two scales are combined into one TIFF because that is how a disk image
+# gets a sharp backdrop on a Retina display -- Finder picks the representation
+# out of the file. A lone PNG is stretched from 1x and looks it; a sibling
+# @2x.png is simply ignored.
+$(DMG_BACKDROP): build Tools/MakeDiskImageBackground/main.swift
+	@mkdir -p build
+	$(SWIFT_BUILD)/MakeDiskImageBackground \
+		build/dmg-background.png build/dmg-background@2x.png
+	tiffutil -cathidpicheck \
+		build/dmg-background.png build/dmg-background@2x.png -out $@
+
+# A release asset: the app beside an Applications symlink to drag it into. The
 # daemon cannot be installed from inside the disk image, so the app asks for a
 # password on first launch from /Applications instead.
-dmg: bundle
-	@rm -rf $(DIST)/stage $(DMG)
-	@mkdir -p $(DIST)/stage
-	cp -R $(BUNDLE) $(DIST)/stage/
-	ln -s /Applications $(DIST)/stage/Applications
-	hdiutil create -volname "Awake $(VERSION)" -srcfolder $(DIST)/stage \
-		-ov -quiet -format UDZO $(DMG)
-	@rm -rf $(DIST)/stage
+#
+# Built read-write and compressed at the end, because the window layout is
+# something only Finder can write, and only into a volume it can modify.
+#
+# Note that the Finder step needs permission to control Finder; macOS asks the
+# first time, and denying it fails this target rather than quietly shipping an
+# unstyled image.
+dmg: bundle $(DMG_BACKDROP)
+	@rm -rf $(DMG_STAGE) $(DMG_RW) $(DMG)
+	-@hdiutil detach $(DMG_MOUNT) -quiet 2>/dev/null || true
+	@mkdir -p $(DMG_STAGE)/.background
+	cp -R $(BUNDLE) $(DMG_STAGE)/
+	ln -s /Applications $(DMG_STAGE)/Applications
+	cp $(DMG_BACKDROP) $(DMG_STAGE)/.background/background.tiff
+
+	hdiutil create -srcfolder $(DMG_STAGE) -volname "$(DMG_VOLUME)" -fs HFS+ \
+		-format UDRW -ov -quiet $(DMG_RW)
+	hdiutil attach $(DMG_RW) -mountpoint $(DMG_MOUNT) -quiet
+	osascript Tools/dmg-window.applescript "$(DMG_VOLUME)"
+	hdiutil detach $(DMG_MOUNT) -quiet
+
+	hdiutil convert $(DMG_RW) -format UDZO -o $(DMG) -quiet
+	@rm -rf $(DMG_STAGE) $(DMG_RW)
 	@echo "built $(DMG)"
 
 check-root:

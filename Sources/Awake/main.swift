@@ -31,6 +31,23 @@ default:
     CommandLineInterface.run(arguments)
 }
 
+func anotherInstanceIsRunning() -> Bool {
+    guard let identifier = Bundle.main.bundleIdentifier else { return false }
+    let mine = ProcessInfo.processInfo.processIdentifier
+    return NSRunningApplication
+        .runningApplications(withBundleIdentifier: identifier)
+        .contains { $0.processIdentifier != mine }
+}
+
+// Installing from the disk image starts the app twice: once by hand out of
+// /Applications, and again a moment later when the freshly bootstrapped login
+// agent launches its own copy. Without this there would be two mugs.
+//
+// The newcomer yields instead of displacing the incumbent, and exits zero so
+// that the agent's KeepAlive -- which restarts only on failure -- lets it stay
+// down. The next login starts a single copy, launchd's.
+if anotherInstanceIsRunning() { exit(0) }
+
 let application = NSApplication.shared
 let controller = MenuBarController()
 application.delegate = controller

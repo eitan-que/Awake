@@ -26,22 +26,34 @@ the Mac is being held awake.
 
 ## Install
 
-Requires macOS 13 or newer. Either route installs the same thing; the disk
-image needs no toolchain, building from source needs no trip through Gatekeeper.
+Requires macOS 13 or newer. Both routes install the same thing, but **building
+from source is the one to use**: it skips Gatekeeper entirely, and it lets you
+sign with your own certificate, which is what keeps macOS from listing Awake as
+an unidentified developer. The disk image is there for machines without a
+toolchain.
 
-### From source
+### From source, signed with your own certificate
 
 Needs the Xcode command line tools.
 
 ```sh
 git clone https://github.com/eitan-que/Awake.git
 cd Awake
-sudo make install
+sudo make install CODESIGN_ID="Apple Development: you@example.com (XXXXXXXXXX)"
 ```
 
-That builds the app, installs it to `/Applications`, links `awake` into
-`/usr/local/bin`, registers the privileged helper, and starts the menu bar app
-at login for every user.
+Get that identity once, free, with an ordinary Apple ID: in Xcode, **Settings >
+Accounts**, add your Apple ID, then **Manage Certificates > + > Apple
+Development**. `security find-identity -v -p codesigning` then prints the name to
+paste above. [Signing](#signing) explains what it buys and how to fix the one
+thing that commonly goes wrong.
+
+Leaving `CODESIGN_ID` out also works -- the build is then signed ad-hoc, and
+Awake runs exactly the same. Only its presentation in System Settings suffers.
+
+Either way, that builds the app, installs it to `/Applications`, links `awake`
+into `/usr/local/bin`, registers the privileged helper, and starts the menu bar
+app at login for every user.
 
 To remove everything, including the helper, and restore normal sleep:
 
@@ -67,28 +79,28 @@ to open it on the first try. To let it through, open **System Settings > Privacy
 confirm with your admin password. Since macOS 15 this is the only way in --
 Control-clicking the app no longer skips the check.
 
+For the same reason, **System Settings > General > Login Items & Extensions**
+will show Awake as two separate rows reading *Item from unidentified developer*,
+without an icon. Nothing is wrong; a signature with no Team ID cannot be
+attributed to the app. Building from source with your own certificate is what
+turns those two rows into one named "Awake" -- see [Signing](#signing).
+
 ### Signing
 
-The default build is signed ad-hoc, which runs fine but looks untidy: System
-Settings > General > Login Items & Extensions lists Awake's two launchd jobs as
-separate rows reading *Item from unidentified developer*, with no icon.
+Awake installs two launchd jobs -- the menu bar agent and the privileged daemon
+-- and both plists carry `AssociatedBundleIdentifiers`, the key that folds them
+into a single "Awake" row in Login Items & Extensions. macOS honours that key
+only when the signed program has a Team ID, and an **ad-hoc signature has none**,
+so an unsigned build gets two anonymous rows instead, each reading *Item from
+unidentified developer*, neither with an icon.
 
-Both plists already carry `AssociatedBundleIdentifiers`, the key that folds
-them into one "Awake" row, but macOS honours it only when the signed program
-has a Team ID -- and an ad-hoc signature has none. Any real certificate
-supplies one, including the free kind: in Xcode, **Settings > Accounts**, add
-your Apple ID, then **Manage Certificates > + > Apple Development**. A paid
-Developer ID is only needed to give the built app to someone else.
+Any real certificate supplies a Team ID, including the free kind described
+above. Signed that way, Login Items shows one "Awake" entry with the app icon
+and two items, one of them system-wide -- that one is the daemon.
 
-Then pass the identity, exactly as `security find-identity -v -p codesigning`
-prints it:
-
-```sh
-sudo make install CODESIGN_ID="Apple Development: you@example.com (XXXXXXXXXX)"
-```
-
-Login Items then shows a single "Awake" entry with the app icon and two items,
-one of them system-wide -- that one is the daemon.
+A paid Developer ID buys one further thing, and only one: letting *other* people
+open a build you hand them without going through Gatekeeper by hand. It makes no
+difference to the machine you built on.
 
 If `find-identity` reports the certificate but not as a *valid* identity
 (`CSSMERR_TP_NOT_TRUSTED`), the chain cannot be built: macOS ships an

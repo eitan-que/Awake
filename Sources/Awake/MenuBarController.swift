@@ -100,6 +100,11 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
                        it can turn sleep off. Drag Awake to Applications and \
                        open it again.
                        """)
+            // Quit rather than linger: a copy still running out of the disk
+            // image is the one thing that would stop the copy in /Applications
+            // from starting, since that one stands aside for a running
+            // instance.
+            NSApp.terminate(nil)
             return
         }
 
